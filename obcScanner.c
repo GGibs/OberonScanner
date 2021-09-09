@@ -2,6 +2,8 @@
 
 #include "obcScanner.h"
 
+/* These are ordered by their appearance in the grammar */
+/* Consider re-ordering to accommodate hash lookup */
 const char* const resWrds[] =
 {
   "MODULE", "BEGIN", "END", "CONST", "TYPE", "VAR",
@@ -11,6 +13,7 @@ const char* const resWrds[] =
   "LOOP", "CASE", "OR", "DIV", "MOD"
 };
 
+/* same here for the res word symbols */
 const char* const symbols[] =
 {
   "MODULEsym", "BEGINsym", "ENDsym", "CONSTsym", "TYPEsym", "VARsym",
@@ -32,7 +35,8 @@ unsigned int varBuffPtr = 0;
 unsigned int lineBuffPtr = 0;
 unsigned int prevLinePtr = 0; /* used in parser for error diagnostics */
 
-static short int enable_output = 1; /* used for scanner directives ONLY at this time */
+
+static short int enable_output; /* set to 1 to enable output by default */
 unsigned int curLine = 0; /* used for output and error messages */
 int sym;
 int endOfLine = 0;
@@ -41,15 +45,24 @@ char ch = '\0';
 
 FILE* file;
 
+
 void nextSym()
 {
   varBuffPtr = 0;
+  /* If at a newline character and it is not the end of file - get a new line */
   while (ch == '\0' && !EOFflag)
     newLine();
+
   /* Set sym to the appropriate token - if elseif else */
   isAlpha() ? getAlphaToken() : (isDigit() ? getDigitToken() : getMiscToken());
+
+  /* For parser error diagnostics */
   prevLinePtr = lineBuffPtr;
+
+  /* Advance lineBuffPtr through whitespace in preparation for the ch call */
   skipSep();
+
+  /* Most of this is for output purposes, only the initial if statement (w/o print) is truly req'd */
   if (sym == -1 && !EOFflag) /* If in a comment call nextSym until a valid symbol is found */
   {
     if (enable_output)
@@ -57,7 +70,7 @@ void nextSym()
     nextSym();
   }
   else if (enable_output)
-    printf("%-15s -->\t%s\n", symbols[sym], varBuffer);
+    printf("%-15s -->\t%s\n", symbols[sym], varBuffer); /* Symbol has been found (not needed outside of testing purposes) */
 }
 
 void newLine()
@@ -97,8 +110,10 @@ int setLineBuffer()
 
 void getAlphaToken()
 {
+  /* First char must be a letter so don't have to explicitly check for it */
   while (isAlpha() || isDigit())
     nextChar();
+  /* Check varBuffer for overflow */
   if (varBuffPtr > MAX_VAR_LEN)
     scanError(3);
   varBuffer[varBuffPtr] = '\0'; /* if there is left over input, it's ignored */
@@ -111,7 +126,7 @@ void getAlphaToken()
   #endif
 }
 
-void getDigitToken()
+void getDigitToken() /* convert to binary here? */
 {
   while (ch == '0') /* skip leading zeroes */
     ch = lineBuffer[lineBuffPtr++];
@@ -129,6 +144,7 @@ void getDigitToken()
       scanWarning(1);
     nextChar();
   }
+  /* Check varBuffer for overflow */
   if (varBuffPtr > MAX_VAR_LEN)
     scanError(3);
   varBuffer[varBuffPtr] = '\0'; /* if there is left over input, it's ignored */
@@ -214,6 +230,9 @@ void getMiscToken()
   varBuffer[varBuffPtr] = '\0';
 }
 
+/* This function has a lot of 'useless' functionality that would not be in */
+/* an actual scanner but is done so that the testing output is explicit */
+/* as to when it is scanning comments. */
 int inComment()
 {
   int ret = 0;
@@ -233,12 +252,12 @@ void checkDirective()
   if (lineBuffer[lineBuffPtr+1] == 's')
   {
     char c = lineBuffer[lineBuffPtr+2];
-    if (c == '+')
+    if (c == '+' && !enable_output)
     {
       enable_output = 1;
       printf("\t**Scanner Directive found - Scanner output enabled**\n");
     }
-    else if (c == '-')
+    else if (c == '-' && enable_output)
     {
       enable_output = 0;
       printf("\t**Scanner Directive found - Scanner output disabled**\n");
@@ -250,6 +269,8 @@ void commentSkip()
 {
   do
   {
+    /* Will store the comments in the var buffer for output/testing */
+    /* purposes if output is enabled - normally don't want this */
     if (enable_output)
       varBuffer[varBuffPtr++] = ch;
     ch = lineBuffer[lineBuffPtr++];
@@ -258,6 +279,7 @@ void commentSkip()
 
 void commentNewLine()
 {
+  /* Catch nested comments containing an empty line */
   while (ch == '\0')
   {
     varBuffer[varBuffPtr] = '\0';
@@ -310,7 +332,9 @@ int checkResWord(const char* token)
 
 void doubleToken(int t1, int t2, char ch)
 {
+  /* Assume it is a single token */
   sym = t1;
+  /* If not, get double token */
   if (lineBuffer[lineBuffPtr] == ch)
   {
     sym = t2;
@@ -328,8 +352,7 @@ void scanError(int errNum)
       printf("Error: Invalid token '%c' on line %d\n", ch, curLine);
       break;
     case 1:
-      printf("Error on line %d. Expecting an 'H' but found: %c\n", curLine, lineBuffer[--lineBuffPtr]);
-      ++lineBuffPtr;
+      printf("Error on line %d. Expecting an 'H' but found: %c\n", curLine, lineBuffer[lineBuffPtr-1]);
       break;
     case 2:
       printf("Exceeded maximum line length of %d on line: %d\n", MAX_LINE_LEN, curLine);
@@ -366,35 +389,37 @@ void scanWarning(int warningNum)
     printf("%*c\b^\n", lineBuffPtr, ' ');
 }
 
-void nextChar()
+/*inline*/ void nextChar()
 {
   varBuffer[varBuffPtr++] = ch;
   ch = lineBuffer[lineBuffPtr++];
 }
 
-void skipSep()
+/* Ordered by presumed frequency of occurrence for efficiency */
+/*inline*/ void skipSep()
 {
   while (ch == 32 || ch == 11 || ch == 13 || ch == 9)
     ch = lineBuffer[lineBuffPtr++];
 }
 
-int isHexChar()
+/*inline*/ int isHexChar()
 {
   return (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F');
 }
 
-int isAlpha()
+/*inline*/ int isAlpha()
 {
   return ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'));
 }
 
-int isDigit()
+/*inline*/ int isDigit()
 {
   return (ch >= '0' && ch <= '9');
 }
 
 int cmpWords(const char* w1, const char* w2)
 {
+  /* Need to ensure the integrity of the original array is not comprimised */
   const unsigned char* s1 = (const unsigned char *) w1;
   const unsigned char* s2 = (const unsigned char *) w2;
   unsigned char c1, c2; /* Will be comparing these 2 chars */
@@ -414,6 +439,7 @@ int cmpWords(const char* w1, const char* w2)
   return result; /* words must be different, return 0 */
 }
 
+/* for marking and testing purposes  */
 void printLine()
 {
   (cmpWords(lineBuffer, "\0")) ? printf("%d: Empty Line\n", curLine)
@@ -421,6 +447,7 @@ void printLine()
 }
 
 #if ENABLE_HASH
+/********** PERFECT MINIMAL HASH FUNCTION ATTEMPT HERE  *******************/
 
 #define MIN_WORD_LEN    2   /* 'MULTIPLE'     */
 #define MAX_WORD_LEN    9   /* PROCEDURE      */
@@ -428,8 +455,15 @@ void printLine()
 #define MAX_HASH_VALUE  27  /* DIV            */
 #define NUM_HASH_VALS   24
 
+/* The hash function maps the compile time constant */
+/* reserved words to a specific key (injective function) */
+
+/* If the characters in word are outside the bounds of the */
+/* array, it can't be one of the known words and 0 is returned */
 static unsigned int hash(const char* word, unsigned int len)
 {
+  /* This ONLY works for the exact 28 reserved words in */
+  /* the Oberon-S grammar so let's hope they don't change! */
   static const unsigned char hashVals[] =
   {
     21, 2, 6, 5, 1, 6, 13, 35, 18, 35, 35, 21,
@@ -438,30 +472,44 @@ static unsigned int hash(const char* word, unsigned int len)
   unsigned int iVal = len;
   unsigned int temp;
 
+  /* HOW IT WORKS - USING 'MODULE' RES WORD AS AN EXAMPLE */
   switch (iVal)
   {
-    default:
-      temp = (unsigned char)word[2]-65;
-      if (temp > NUM_HASH_VALS)
-        return 0;
-      iVal += hashVals[temp];
-    case 2:
+    /* Only need to look at the first 3 letters (and length of word) to get a unique hash */
+    /* (MOD and MODULE have same hash otherwise) */
+    /* Not a bijection as the hash function has no inverse (can't go from 18 back to 'MODULE') */
+    default: /* For words of len > 2 and then they flow down */
+      temp = (unsigned char)word[2]-65; /* TEMP = 3 (ASCII of D - 65, using MODULE) (3rd letter) */
+      if (temp > NUM_HASH_VALS)             /* (NUM_RES_WORDS-4 -> constant) */
+        return 0;                       /* outside hashVals array bounds (NOT a reserved word in this case) */
+      iVal += hashVals[temp];           /* iVal = 5 + 6 (hashVals[3] + len) */
+    case 2:                             /* Words of len 2 flow down immediately */
     case 1:
-      temp = (unsigned char)word[0]-65;
+      temp = (unsigned char)word[0]-65; /* TEMP = 12 (ASCII of M -65) (1st letter) */
       if (temp > NUM_HASH_VALS)
         return 0;
-      iVal += hashVals[temp];
+      iVal += hashVals[temp];           /* iVal = 21 (11 + 10) as hashVals[12] = 10 */
       break;
   }
-  temp = (unsigned char)word[len-1]-65;
+  temp = (unsigned char)word[len-1]-65; /* TEMP = 4 (ASCII of E - 65) (2nd letter) */
   if (temp > NUM_HASH_VALS)
     return 0;
-  iVal += hashVals[temp];
-  return (iVal == 34) ? iVal -7 : iVal - 4;
+  iVal += hashVals[temp];               /* iVal = 22 (21 + 1) */
+  /* I couldn't get DIV to fit perfectly so using a kluge here to make the hash perfectly minimal */
+  /* More for fun than any functional purpose */
+  return (iVal == 34) ? iVal -7 : iVal - 4; /* iVal = 18 (22 - 4 for MODULE) */
 }
 
+/* Determines if a word (string) is a reserved word or not. Returns  */
+/* a resWrd structure containing the name and corresponding token of the */
+/* reserved word. Otherwise it returns 0. Uses the hash function above. */
 struct resWrd *checkResWord(const char* word, unsigned int len)
 {
+  /* This structure array makes the resWrds[] and part of the symbols[] redundant. */
+  /* They have been kept in the code for use in the non hash version although */
+  /* they could be replaced by a similar struct in that version as well. */
+  /* I actually prefer having the separate tables and maybe should have */
+  /* re-arranged the table ordering to accomodate the hash. */
   static struct resWrd wordlist[] =
   {
     {"TO", TOsym},
@@ -482,7 +530,7 @@ struct resWrd *checkResWord(const char* word, unsigned int len)
     {"RECORD", RECORDsym},
     {"VAR", VARsym},
     {"CONST", CONSTsym},
-    {"MODULE", MODULEsym},
+    {"MODULE", MODULEsym}, /* MODULE placed as 18th entry */
     {"MOD", MODsym},
     {"EXIT", EXITsym},
     {"WHILE", WHILEsym},
@@ -496,6 +544,9 @@ struct resWrd *checkResWord(const char* word, unsigned int len)
 
   if (len <= MAX_WORD_LEN && len >= MIN_WORD_LEN) /* if not true, not a reserved word */
   {
+    /* Using the MODULE example, the key of 18 will be returned */
+    /* and MODULE is conveniently placed in the 18th (19th?) */
+    /* position of the wordlist array. */
     unsigned int key = hash (word, len);
     struct resWrd *resWrdStruct;
     if (key <= MAX_HASH_VALUE)
@@ -509,12 +560,14 @@ compare: /* Verifying it is a match */
     {
       const char *s = resWrdStruct->name;
       if (*word == *s && cmpWords(word+1, s+1))
+        /* consider just returning the token - would require other changes */
         return resWrdStruct;
     }
   }
   return 0; /* Else it is not a match */
 }
 #endif
+
 
 int main(int argc, char** argv)
 {
